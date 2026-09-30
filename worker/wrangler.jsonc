@@ -1,0 +1,9 @@
+{
+  "name": "air-score-api",
+  "main": "src.mjs",
+  "compatibility_date": "2026-09-30",
+  "vars": {
+    "ALLOWED_ORIGIN": "https://kzmcuag.github.io"
+  }
+}
+

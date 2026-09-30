@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIR SCORE — 航空機のための8秒</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,'Yu Gothic',system-ui,sans-serif;color:#e5eaf0;background:#0b111b}*{box-sizing:border-box}body{margin:0;padding:36px;max-width:1400px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;gap:20px}h1{font-size:32px;letter-spacing:.16em;margin:8px 0}p{color:#93a4bb;line-height:1.8}.tag{font-size:11px;letter-spacing:.2em;color:#72dcc8}.badge{border:1px solid #344252;border-radius:30px;padding:9px 15px;font-size:12px;color:#72dcc8}.controls{display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin:28px 0}button{border:0;border-radius:8px;padding:14px 25px;background:#79e4ce;color:#082920;font-weight:700;cursor:pointer}button:disabled{opacity:.4;cursor:default}button.secondary{background:#223044;color:#dbe5ef}label{font-size:13px;display:flex;gap:12px;align-items:center}input{accent-color:#79e4ce}select{padding:8px;background:#162132;color:white;border:1px solid #344252;border-radius:6px}.panel{border:1px solid #273345;border-radius:14px;background:#101a28;overflow:hidden}.stats{display:flex;gap:40px;padding:20px 24px;border-bottom:1px solid #273345;flex-wrap:wrap}.stat small{display:block;color:#8297b0;font-size:10px;letter-spacing:.13em;margin-bottom:7px}.stat strong{font-weight:500;font-size:22px;font-variant-numeric:tabular-nums}canvas{display:block;width:100%;height:430px}.axis{display:flex;justify-content:space-between;padding:12px 24px;color:#8496ad;font-size:11px;border-top:1px solid #273345}.progress{height:3px;background:#233246}.progress div{height:100%;background:#79e4ce;width:0}.legend{display:flex;gap:22px;flex-wrap:wrap;font-size:12px;margin:16px 0;color:#9eb0c5}.dot{color:#79e4ce}.notes{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:36px}.notes h3{font-size:13px;font-weight:500;color:#d6e1ec}.notes p{font-size:12px}footer{margin-top:26px;font-size:12px;color:#7d90aa}#status{min-height:20px;color:#a9bfcd;font-size:12px}@media(max-width:700px){body{padding:20px}header{align-items:flex-start}h1{font-size:25px}.notes{grid-template-columns:1fr 1fr}.stats{gap:22px}canvas{height:340px}.controls{gap:14px}.badge{white-space:nowrap}}
+</style>
+<header><div><div class="tag">GENERATIVE FLIGHT SONIFICATION</div><h1>AIR SCORE</h1><p>地球を8秒で聴く。空の移動が、反復を少しずつ変えていく。</p></div><span class="badge">MOCK DATA / OFFLINE</span></header>
+<div class="controls"><button id="start">▶ Start</button><button id="stop" class="secondary" disabled>■ Stop</button><label>音量 <input id="volume" aria-label="音量" type="range" min="0" max="100" value="35"><output id="volLabel">35%</output></label><label>航空機数 <select id="count"><option>16</option><option selected>32</option><option>64</option><option>96</option></select></label></div>
+<div class="panel"><div class="stats"><div class="stat"><small>SCAN POSITION</small><strong id="position">0.00 / 8.00 s</strong></div><div class="stat"><small>LOOP</small><strong id="loop">001</strong></div><div class="stat"><small>AIRCRAFT</small><strong id="aircraft">32</strong></div><div class="stat"><small>SIMULATION TIME</small><strong id="elapsed">00:00</strong></div></div><canvas id="map" aria-label="経度を横軸、緯度を縦軸とした航空機点群と走査線"></canvas><div class="progress"><div id="bar"></div></div><div class="axis"><span>180° W · 0 s</span><span>0° · 4 s</span><span>180° E · 8 s</span></div></div>
+<div class="legend"><span class="dot">● 低高度：柔らかな基音</span><span style="color:#aaa1ff">● 高高度：倍音を含む音色</span><span>発音時に点が光ります</span></div><div id="status" role="status">Startで音声を開始します。ヘッドホンで小さめの音量からどうぞ。</div>
+<section class="notes"><div><h3>01 / 経度 → 発音時刻</h3><p>西から東へ8秒で走査。各機の経度を通過すると音が鳴ります。</p></div><div><h3>02 / 緯度 → 音高</h3><p>南ほど低く、北ほど高く。連続的な音高で、移動の微細な変化を保ちます。</p></div><div><h3>03 / 高度 → 音色</h3><p>高度が高いほど倍音が増加。短いベル状の音が余韻を残します。</p></div><div><h3>04 / 速度・方位 → 変化</h3><p>地上速度と進行方位で位置を外挿。実時間の速度で、ループごとに少しずつ変化します。</p></div></section>
+<footer>合成した航空機データを使用しています。実際の運航情報ではありません。停止すると時間と音声をリセットします。</footer>
+<script>
+'use strict';
+// Data boundary: replace MockProvider with a provider implementing snapshot().
+// snapshot() returns { timestamp: Unix milliseconds, aircraft: Flight[] }.
+// Flight = { id, lat: degrees, lon: degrees, altitudeFt, groundspeedKt, headingDeg }.
+// Normalize vendor fields/units upstream. Keep API credentials in a server proxy.
+const PERIOD=8, EARTH_KM=6371, RAD=Math.PI/180;
+const wrapLon=x=>((x+180)%360+360)%360-180;
+function project(f,seconds){
+  const d=f.groundspeedKt*1.852/3600*seconds/EARTH_KM;
+  const lat=f.lat*RAD,lon=f.lon*RAD,b=f.headingDeg*RAD;
+  const p=Math.asin(Math.max(-1,Math.min(1,Math.sin(lat)*Math.cos(d)+Math.cos(lat)*Math.sin(d)*Math.cos(b))));
+  const l=lon+Math.atan2(Math.sin(b)*Math.sin(d)*Math.cos(lat),Math.cos(d)-Math.sin(lat)*Math.sin(p));
+  return {...f,lat:p/RAD,lon:wrapLon(l/RAD)};
+}
+const phase=lon=>(wrapLon(lon)+180)/360*PERIOD;
+const frequency=lat=>110*Math.pow(2,(lat+90)/60);
+class MockProvider{
+  constructor(count){this.count=count;}
+  async snapshot(){let seed=73819;const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};return {timestamp:Date.now(),aircraft:Array.from({length:this.count},(_,i)=>({id:'MOCK-'+String(i+1).padStart(3,'0'),lat:-55+rand()*120,lon:-178+rand()*356,altitudeFt:5000+rand()*36000,groundspeedKt:280+rand()*250,headingDeg:rand()*360}))};}
+}
+let snapshot=null,provider=new MockProvider(32),ctx,master,compressor,timer,running=false,starting=false,epoch=0,nextLoop=0,generation=0;
+const active=new Set(),flashes=new Map(),$=id=>document.getElementById(id);
+// A loop uses predicted positions at its start, ensuring one onset per aircraft.
+// This prototype fetches once at Start. Add polling / reconciliation in the provider layer.
+function loopEvents(data,k){return data.aircraft.map(f=>{const p=project(f,k*PERIOD);return {flight:p,time:k*PERIOD+phase(p.lon),hz:frequency(p.lat)};});}
+function scheduleLoop(k){for(const e of loopEvents(snapshot,k)){
+ const at=epoch+e.time;if(at<ctx.currentTime-.02)continue;
+ const osc=ctx.createOscillator(),overtone=ctx.createOscillator(),gain=ctx.createGain(),harm=ctx.createGain();
+ const height=Math.max(0,Math.min(1,e.flight.altitudeFt/45000));
+ osc.type='sine';osc.frequency.value=e.hz;overtone.type='sine';overtone.frequency.value=e.hz*2.003;harm.gain.value=.04+height*.5;
+ const amp=.22/Math.sqrt(snapshot.aircraft.length);gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(amp,at+.012);gain.gain.exponentialRampToValueAtTime(.00001,at+1.5);
+ osc.connect(gain);overtone.connect(harm);harm.connect(gain);gain.connect(master);osc.start(at);overtone.start(at);osc.stop(at+1.55);overtone.stop(at+1.55);
+ const voice={osc,overtone,gain,harm};active.add(voice);osc.onended=()=>{active.delete(voice);osc.disconnect();overtone.disconnect();gain.disconnect();harm.disconnect();};
+ flashes.set(e.flight.id,e.time);
+ }}
+function tick(){if(!running)return;while(epoch+nextLoop*PERIOD<ctx.currentTime+.12){scheduleLoop(nextLoop++);}}
+async function start(){if(running||starting)return;starting=true;$('start').disabled=true;const token=++generation;
+ try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();await ctx.resume();const data=await provider.snapshot();if(token!==generation)return;snapshot=data;
+ if(!master){master=ctx.createGain();compressor=ctx.createDynamicsCompressor();master.connect(compressor);compressor.connect(ctx.destination);}
+ master.gain.setValueAtTime(Number($('volume').value)/100,ctx.currentTime);epoch=ctx.currentTime+.15;nextLoop=0;running=true;flashes.clear();tick();timer=setInterval(tick,40);$('stop').disabled=false;$('count').disabled=true;$('status').textContent='再生中 · 実時間の飛行速度で外挿しています。変化は数十秒〜数分かけて現れます。';
+ }catch(e){$('status').textContent='音声を開始できませんでした: '+e.message;$('start').disabled=false;}finally{starting=false;}}
+function stopAudio(){generation++;running=false;clearInterval(timer);for(const v of active){try{v.osc.stop();v.overtone.stop();}catch{}}active.clear();flashes.clear();$('start').disabled=false;$('stop').disabled=true;$('count').disabled=false;$('status').textContent='停止しました。Startで先頭から再生します。';}
+$('start').addEventListener('click',start);$('stop').addEventListener('click',stopAudio);
+$('volume').oninput=()=>{$('volLabel').value=$('volume').value+'%';if(master)master.gain.setTargetAtTime(Number($('volume').value)/100,ctx.currentTime,.03);};
+$('count').onchange=async()=>{provider=new MockProvider(Number($('count').value));snapshot=await provider.snapshot();$('aircraft').textContent=snapshot.aircraft.length;};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&running){stopAudio();$('status').textContent='タブが非表示になったため停止しました。Startで再開できます。';}});
+const canvas=$('map'),g=canvas.getContext('2d');
+function draw(){const w=canvas.clientWidth,h=canvas.clientHeight,dpr=window.devicePixelRatio||1;if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+ const t=running?Math.max(0,ctx.currentTime-epoch):0,scan=t%PERIOD,x=scan/PERIOD*w;
+ g.strokeStyle='#213044';g.lineWidth=1;g.font='10px system-ui';g.fillStyle='#627993';for(let lat=-60;lat<=60;lat+=30){const y=(90-lat)/180*h;g.beginPath();g.moveTo(0,y);g.lineTo(w,y);g.stroke();g.fillText(lat+'°',9,y-6);}for(let lon=-120;lon<=120;lon+=60){const xx=(lon+180)/360*w;g.beginPath();g.moveTo(xx,0);g.lineTo(xx,h);g.stroke();}
+ const gradient=g.createLinearGradient(Math.max(0,x-65),0,x+1,0);gradient.addColorStop(0,'#79e4ce00');gradient.addColorStop(1,'#79e4ce18');g.fillStyle=gradient;g.fillRect(Math.max(0,x-65),0,Math.min(65,x),h);g.strokeStyle='#79e4ce';g.beginPath();g.moveTo(x,0);g.lineTo(x,h);g.stroke();
+ if(snapshot)for(const f of snapshot.aircraft){const p=project(f,t),xx=(p.lon+180)/360*w,y=(90-p.lat)/180*h;let age=t-(flashes.get(f.id)??-10);if(age<0)age+=PERIOD;const glow=running?Math.max(0,1-age/.7):0;g.fillStyle=`hsl(${165+p.altitudeFt/45000*95} 68% 72%)`;if(glow){g.globalAlpha=glow*.25;g.beginPath();g.arc(xx,y,6+glow*13,0,Math.PI*2);g.fill();g.globalAlpha=1;}g.beginPath();g.arc(xx,y,2.8+glow*2,0,Math.PI*2);g.fill();}
+ $('position').textContent=scan.toFixed(2)+' / 8.00 s';$('loop').textContent=String(Math.floor(t/PERIOD)+1).padStart(3,'0');$('elapsed').textContent=String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0');$('bar').style.width=scan/PERIOD*100+'%';requestAnimationFrame(draw);}
+provider.snapshot().then(s=>{snapshot=s;draw();});
+// Read-only diagnostics for integration / numerical verification.
+window.airScore={project,phase,frequency,loopEvents,MockProvider,getState:()=>({running,aircraft:snapshot?.aircraft.length,voices:active.size,loop:nextLoop,audioState:ctx?.state})};
+</script>
+</html>
+
+
